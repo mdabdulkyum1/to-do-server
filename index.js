@@ -27,7 +27,16 @@ async function run() {
   try {
     
     
+    const userCollection = client.db("taskAppDB").collection("users");
 
+    // Create a new user
+
+    // get users
+    app.get('/users', async (req, res)=> {
+      const cursor = userCollection.find({});
+      const users = await cursor.toArray();
+      res.send(users);
+    })
 
 
   } finally {
@@ -40,7 +49,7 @@ run().catch(console.dir);
 
 
 app.get('/', (req, res)=> {
-    res.send("assignment 12 server running...");
+    res.send("assignment Job task server is running...");
 })
 app.listen(port, ()=>{
     console.log(`server running on PORT: ${port}`);
