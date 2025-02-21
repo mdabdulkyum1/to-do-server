@@ -69,11 +69,47 @@ async function run() {
       const result = await tasksCollection.insertOne(task);
 
       // Emit event to notify clients about new task
-      io.emit("taskAdded", result);
+      io.emit("taskUpdated", result);
       res.send(result);
     });
 
+    // get tasks
+    app.get("/tasks", async (req, res) => {
+      const tasks = await tasksCollection.find({}).toArray();
+      res.send(tasks);
+    });
 
+    // get task by id
+    app.get("/tasks/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const task = await tasksCollection.findOne(query);
+      res.send(task);
+    });
+
+    // delete task
+    app.delete("/tasks/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await tasksCollection.deleteOne(query);
+
+      // Emit event to notify clients about task deletion
+      io.emit("taskUpdated", result);
+      res.send(result);
+    });
+
+    // update task
+    app.patch("/tasks/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updatedTask = req.body;
+      const newValues = { $set: updatedTask };
+      const result = await tasksCollection.updateOne(query, newValues);
+
+      // Emit event to notify clients about task update
+      io.emit("taskUpdated", result);
+      res.send(result);
+    });
 
 
 
