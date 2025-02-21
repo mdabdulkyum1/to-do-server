@@ -1,56 +1,96 @@
-const express = require('express');
-const cors = require('cors');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-require('dotenv').config()
-
+const express = require("express");
+const cors = require("cors");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const http = require("http");
+const socketIo = require("socket.io");
+require("dotenv").config();
 
 const port = process.env.PORT || 5000;
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, { cors: { origin: "*" } });
 
-// mid
-
+// Middleware
 app.use(cors());
 app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.USER_DB}:${process.env.PASS_DB}@cluster0.kzmhu.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
 
 async function run() {
   try {
-    
-    
-    const userCollection = client.db("taskAppDB").collection("users");
+    await client.connect();
+    const usersCollection = client.db("taskAppDB").collection("users");
+    const tasksCollection = client.db("taskAppDB").collection("tasks");
+
+    // Socket.io connection
+    io.on("connection", (socket) => {
+      console.log("A client connected");
+
+      socket.on("disconnect", () => {
+        console.log("Client disconnected");
+      });
+    });
 
     // Create a new user
+    app.post("/users", async (req, res) => {
+      const userInfo = req.body;
+      const email = userInfo?.email;
+      const query = { email };
 
-    // get users
-    app.get('/users', async (req, res)=> {
-      const cursor = userCollection.find({});
-      const users = await cursor.toArray();
+      const isExist = await usersCollection.findOne(query);
+      if (isExist) {
+        return res.send("User already has an account");
+      }
+      const userWithRole = { ...userInfo, role: "student" };
+      const result = await usersCollection.insertOne(userWithRole);
+
+      // Emit event to notify clients about new user
+      io.emit("userAdded", result);
+      res.send(result);
+    });
+
+    // Get users
+    app.get("/users", async (req, res) => {
+      const users = await usersCollection.find({}).toArray();
       res.send(users);
-    })
+    });
+
+    // Task related apis
+    app.post("/tasks", async (req, res) => {
+      const task = req.body;
+      const result = await tasksCollection.insertOne(task);
+
+      // Emit event to notify clients about new task
+      io.emit("taskAdded", result);
+      res.send(result);
+    });
 
 
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
+
+
+
+
+
+
+
+  } catch (error) {
+    console.error("Error in server:", error);
   }
 }
 run().catch(console.dir);
 
+app.get("/", (req, res) => {
+  res.send("Assignment Job Task server is running...");
+});
 
-
-app.get('/', (req, res)=> {
-    res.send("assignment Job task server is running...");
-})
-app.listen(port, ()=>{
-    console.log(`server running on PORT: ${port}`);
-})
+server.listen(port, () => {
+  console.log(`Server running on PORT: ${port}`);
+});
