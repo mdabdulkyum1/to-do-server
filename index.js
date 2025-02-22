@@ -39,22 +39,31 @@ async function run() {
       });
     });
 
+    // Emit updated tasks list
+    async function emitUpdatedTasks() {
+      const tasks = await tasksCollection.find().sort({ order: 1 }).toArray();
+      io.emit("taskUpdated", tasks);
+    }
+
     // Create a new user
     app.post("/users", async (req, res) => {
-      const userInfo = req.body;
-      const email = userInfo?.email;
-      const query = { email };
+      try {
+        const userInfo = req.body;
+        const email = userInfo?.email;
+        const query = { email };
 
-      const isExist = await usersCollection.findOne(query);
-      if (isExist) {
-        return res.send("User already has an account");
+        const isExist = await usersCollection.findOne(query);
+        if (isExist) {
+          return res.status(400).send("User already has an account");
+        }
+
+        const userWithRole = { ...userInfo };
+        const result = await usersCollection.insertOne(userWithRole);
+        io.emit("userAdded", result);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send("Error adding user");
       }
-      const userWithRole = { ...userInfo, role: "student" };
-      const result = await usersCollection.insertOne(userWithRole);
-
-      // Emit event to notify clients about new user
-      io.emit("userAdded", result);
-      res.send(result);
     });
 
     // Get users
@@ -63,23 +72,31 @@ async function run() {
       res.send(users);
     });
 
-    // Task related apis
+    // Create task
     app.post("/tasks", async (req, res) => {
-      const task = req.body;
-      const result = await tasksCollection.insertOne(task);
+      try {
+        const task = req.body;
 
-      // Emit event to notify clients about new task
-      io.emit("taskUpdated", result);
-      res.send(result);
+        const lastTask = await tasksCollection.find().sort({ order: -1 }).limit(1).toArray();
+        const newOrder = lastTask.length === 0 ? 0 : lastTask[0].order + 1;
+
+        const newTask = { ...task, order: newOrder };
+
+        const result = await tasksCollection.insertOne(newTask);
+        await emitUpdatedTasks();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send("Error creating task");
+      }
     });
 
-    // get tasks
+    // Get tasks
     app.get("/tasks", async (req, res) => {
-      const tasks = await tasksCollection.find({}).toArray();
+      const tasks = await tasksCollection.find().sort({ order: 1 }).toArray();
       res.send(tasks);
     });
 
-    // get task by id
+    // Get task by id
     app.get("/tasks/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -87,35 +104,57 @@ async function run() {
       res.send(task);
     });
 
-    // delete task
+    // Delete task
     app.delete("/tasks/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await tasksCollection.deleteOne(query);
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await tasksCollection.deleteOne(query);
 
-      // Emit event to notify clients about task deletion
-      io.emit("taskUpdated", result);
-      res.send(result);
+        await emitUpdatedTasks();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send("Error deleting task");
+      }
     });
 
-    // update task
+    // Update task
     app.patch("/tasks/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const updatedTask = req.body;
-      const newValues = { $set: updatedTask };
-      const result = await tasksCollection.updateOne(query, newValues);
+      try {
+        const id = req.params.id;
+        const updatedTask = req.body;
+        const query = { _id: new ObjectId(id) };
+        const newValues = { $set: updatedTask };
+        const result = await tasksCollection.updateOne(query, newValues);
 
-      // Emit event to notify clients about task update
-      io.emit("taskUpdated", result);
-      res.send(result);
+        await emitUpdatedTasks();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send("Error updating task");
+      }
     });
 
+    // Update task order
+    app.patch("/tasks/reorder", async (req, res) => {
+      try {
+        const { reorderedTasks } = req.body; // Array of reordered tasks with updated order values
 
+        const bulkOperations = reorderedTasks.map((task) => ({
+          updateOne: {
+            filter: { _id: new ObjectId(task._id) },
+            update: { $set: { order: task.order } },
+          },
+        }));
 
+        await tasksCollection.bulkWrite(bulkOperations);
+        await emitUpdatedTasks();
 
-
-
+        res.send({ message: "Task order updated successfully" });
+      } catch (error) {
+        console.error("Error updating task order:", error);
+        res.status(500).send("Error updating task order");
+      }
+    });
 
   } catch (error) {
     console.error("Error in server:", error);
